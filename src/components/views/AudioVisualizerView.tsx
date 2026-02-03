@@ -8,10 +8,17 @@ import AppHeader from '../fragments/AppHeader';
 import UploadPrompt from '../fragments/UploadPrompt';
 import PlayerControls from '../fragments/PlayerControls';
 import GlassPanel from '../elements/GlassPanel';
-import { Subtitle, SyncData } from '@/types';
+import { Subtitle } from '@/types';
 
-// Anda mungkin ingin memisahkan logika Modal ke fragment terpisah juga
-// tapi untuk brevity, saya akan simpan structure modal di sini atau import jika sudah dibuat.
+// Definisi Tipe untuk Partikel Visual
+interface Particle {
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+  velocity: { x: number; y: number };
+  alpha: number;
+}
 
 export default function AudioVisualizerView() {
   // --- REFS ---
@@ -20,7 +27,7 @@ export default function AudioVisualizerView() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null>(null);
-  const particlesRef = useRef<any[]>([]);
+  const particlesRef = useRef<Particle[]>([]);
   const animationFrameRef = useRef<number>(0);
   const dataArrayRef = useRef<Uint8Array | null>(null);
 
@@ -37,64 +44,276 @@ export default function AudioVisualizerView() {
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [currentSubtitle, setCurrentSubtitle] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  // ... state lainnya untuk sync tool (dipersingkat untuk contoh struktur)
 
-  // --- LOGIC (Sama seperti sebelumnya, disalin ke sini) ---
-  // ... (Paste functions: initAudioContext, handleFileUpload, handleMicMode, initParticles, startAnimation, dll di sini) ...
-  
-  // Contoh helper yang disingkat:
-  const initAudioContext = () => { /* Logic Context */ };
-  const initParticles = () => { /* Logic Particles */ };
-  
+  // --- LOGIC IMPLEMENTATION ---
+
+  // 1. Inisialisasi Audio Context
+  const initAudioContext = () => {
+    if (!audioContextRef.current) {
+      // Menangani kompatibilitas browser
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new AudioContextClass();
+      
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256; 
+      
+      const bufferLength = analyserRef.current.frequencyBinCount;
+      dataArrayRef.current = new Uint8Array(bufferLength);
+    }
+  };
+
+  // 2. Hubungkan Audio Element (File) ke Analyser
+  const connectAudioSource = () => {
+    if (!audioRef.current || !audioContextRef.current || !analyserRef.current) return;
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+    }
+
+    sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+    sourceRef.current.connect(analyserRef.current);
+    analyserRef.current.connect(audioContextRef.current.destination);
+  };
+
+  // 3. Setup Partikel Visual
+  const initParticles = () => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    particlesRef.current = [];
+    const particleCount = 100;
+
+    for (let i = 0; i < particleCount; i++) {
+      particlesRef.current.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        radius: Math.random() * 3 + 1,
+        color: `hsl(${Math.random() * 360}, 50%, 50%)`,
+        velocity: {
+          x: (Math.random() - 0.5) * 2,
+          y: (Math.random() - 0.5) * 2
+        },
+        alpha: Math.random()
+      });
+    }
+  };
+
+  // 4. Loop Animasi (Render Visualizer)
+  const renderVisualizer = () => {
+    if (!canvasRef.current || !analyserRef.current || !dataArrayRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // --- FIX DI SINI: Gunakan 'as any' ---
+    // Ini memaksa TypeScript mengabaikan pengecekan tipe strict pada ArrayBuffer
+    analyserRef.current.getByteFrequencyData(dataArrayRef.current as any);
+    
+    // Hitung rata-rata bass
+    let bass = 0;
+    for (let i = 0; i < 20; i++) {
+        if (dataArrayRef.current[i]) {
+            bass += dataArrayRef.current[i];
+        }
+    }
+    bass = bass / 20; 
+    const scale = 1 + (bass / 255) * 0.5;
+
+    // Clear Canvas
+    ctx.fillStyle = 'rgba(5, 5, 5, 0.2)'; 
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw Circle Center
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = 100 * scale;
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsl(${bass + 180}, 100%, 50%)`;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = `hsl(${bass + 180}, 100%, 50%)`;
+
+    // Draw Frequency Bars
+    const barCount = 60;
+    const step = (Math.PI * 2) / barCount;
+    
+    for (let i = 0; i < barCount; i++) {
+        const dataIndex = Math.floor((i / barCount) * (dataArrayRef.current.length / 2));
+        const value = dataArrayRef.current[dataIndex] || 0;
+        const barHeight = (value / 255) * 100 * scale;
+        
+        const angle = i * step;
+        
+        const x1 = centerX + Math.cos(angle) * radius;
+        const y1 = centerY + Math.sin(angle) * radius;
+        
+        const x2 = centerX + Math.cos(angle) * (radius + barHeight);
+        const y2 = centerY + Math.sin(angle) * (radius + barHeight);
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `hsl(${i * 5 + bass}, 70%, 60%)`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Draw Particles
+    particlesRef.current.forEach(p => {
+        p.x += p.velocity.x * scale;
+        p.y += p.velocity.y * scale;
+
+        if (p.x < 0 || p.x > width) p.velocity.x *= -1;
+        if (p.y < 0 || p.y > height) p.velocity.y *= -1;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius * scale, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+    });
+
+    animationFrameRef.current = requestAnimationFrame(renderVisualizer);
+  };
+
+  // --- EFFECTS ---
+
+  useEffect(() => {
+    const handleResize = () => {
+        if (canvasRef.current) {
+            canvasRef.current.width = window.innerWidth;
+            canvasRef.current.height = window.innerHeight;
+            initParticles();
+        }
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+     if(subtitles.length > 0) {
+         const found = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
+         setCurrentSubtitle(found ? found.text : '');
+     }
+  }, [currentTime, subtitles]);
+
+
+  // --- HANDLERS ---
+
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    // Logic upload
     const file = e.target.files?.[0];
     if (!file) return;
+
+    initAudioContext();
+    if(audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume();
+    }
+
     setTrackName(file.name);
     setShowIntro(false);
-    setIsPlaying(true);
+    setIsMicMode(false);
     setStatusText("Memutar File Lokal");
     
-    // Simulasi inisialisasi visualizer
     const objectUrl = URL.createObjectURL(file);
     if(audioRef.current) {
         audioRef.current.src = objectUrl;
-        audioRef.current.play();
+        audioRef.current.load();
+        
+        connectAudioSource();
+        
+        audioRef.current.play()
+            .then(() => {
+                setIsPlaying(true);
+                renderVisualizer(); 
+            })
+            .catch(err => console.error("Playback failed", err));
     }
-    // Panggil fungsi visualizer asli di sini
+  };
+
+  const handleMicMode = async () => {
+      try {
+        initAudioContext();
+        if(!audioContextRef.current || !analyserRef.current) return;
+        
+        if(audioContextRef.current.state === 'suspended') {
+            await audioContextRef.current.resume();
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        if(sourceRef.current) sourceRef.current.disconnect();
+
+        const micSource = audioContextRef.current.createMediaStreamSource(stream);
+        micSource.connect(analyserRef.current);
+        sourceRef.current = micSource;
+
+        setIsMicMode(true);
+        setShowIntro(false);
+        setStatusText("Mode Mikrofon Aktif");
+        setIsPlaying(true);
+        
+        if(audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.src = "";
+        }
+
+        renderVisualizer(); 
+
+      } catch (err) {
+          console.error("Mic Error:", err);
+          alert("Gagal akses mikrofon. Pastikan izin diberikan.");
+      }
   };
 
   const togglePlay = () => {
-    if (audioRef.current) {
-        if (isPlaying) audioRef.current.pause();
-        else audioRef.current.play();
+    if (audioRef.current && !isMicMode) {
+        if (isPlaying) {
+            audioRef.current.pause();
+            cancelAnimationFrame(animationFrameRef.current);
+        } else {
+            if(audioContextRef.current?.state === 'suspended') {
+                audioContextRef.current.resume();
+            }
+            audioRef.current.play();
+            renderVisualizer();
+        }
         setIsPlaying(!isPlaying);
     }
+  };
+
+  const handleSeek = (e: ChangeEvent<HTMLInputElement>) => {
+      if(audioRef.current && duration) {
+          const newTime = (parseFloat(e.target.value) / 100) * duration;
+          audioRef.current.currentTime = newTime;
+          setCurrentTime(newTime);
+      }
   };
 
   // --- RENDER ---
   return (
     <MainLayout>
-      {/* 1. Visualizer Layer */}
       <VisualizerCanvas canvasRef={canvasRef} />
-
-      {/* 2. Subtitle Layer */}
       <SubtitleOverlay text={currentSubtitle} />
-
-      {/* 3. UI Layer */}
       <div className="relative z-20 h-screen flex flex-col justify-between p-6 pointer-events-none">
-        
-        {/* Header Fragment */}
         <AppHeader 
             statusText={statusText} 
             onOpenModal={() => setIsModalOpen(true)}
-            onMicMode={() => { /* mic logic */ }}
+            onMicMode={handleMicMode}
         />
-
-        {/* Conditional Center Fragment */}
         {showIntro && <UploadPrompt onFileUpload={handleFileUpload} />}
-
-        {/* Footer Fragment */}
         {!showIntro && !isMicMode && (
             <PlayerControls 
                 isPlaying={isPlaying}
@@ -102,13 +321,16 @@ export default function AudioVisualizerView() {
                 trackName={trackName}
                 currentTime={currentTime}
                 duration={duration}
-                handleSeek={(e) => { /* seek logic */ }}
-                formatTime={(s) => new Date(s * 1000).toISOString().substr(14, 5)}
+                handleSeek={handleSeek}
+                formatTime={(s) => {
+                    if(!s) return "00:00";
+                    const min = Math.floor(s / 60);
+                    const sec = Math.floor(s % 60);
+                    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+                }}
             />
         )}
       </div>
-
-      {/* Modal Fragment (Bisa dipisah jadi components/fragments/LyricsModal.tsx) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm pointer-events-auto">
             <GlassPanel className="w-11/12 max-w-lg rounded-2xl p-6 relative flex flex-col max-h-[90vh]">
@@ -116,20 +338,31 @@ export default function AudioVisualizerView() {
                     <i className="fas fa-times text-xl"></i>
                 </button>
                 <h2 className="text-xl font-bold mb-4">Pengaturan Lirik</h2>
-                {/* Isi Modal Logic disini atau import komponen Content */}
-                <p>Konten modal...</p>
+                <p className="text-gray-300 mb-4">Fitur sinkronisasi lirik akan segera hadir.</p>
+                <div className="flex justify-end">
+                    <button 
+                        onClick={() => setIsModalOpen(false)}
+                        className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition"
+                    >
+                        Tutup
+                    </button>
+                </div>
             </GlassPanel>
         </div>
       )}
-
-      {/* Hidden Audio Element */}
       <audio 
         ref={audioRef} 
-        onEnded={() => setIsPlaying(false)}
+        crossOrigin="anonymous" 
+        onEnded={() => {
+            setIsPlaying(false);
+            cancelAnimationFrame(animationFrameRef.current);
+        }}
         onTimeUpdate={() => {
              if(audioRef.current) {
                  setCurrentTime(audioRef.current.currentTime);
-                 setDuration(audioRef.current.duration);
+                 if(!isNaN(audioRef.current.duration)) {
+                     setDuration(audioRef.current.duration);
+                 }
              }
         }}
       />

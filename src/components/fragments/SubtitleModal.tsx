@@ -20,6 +20,7 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
   const [activeTab, setActiveTab] = useState<TabType>('manual');
   const [srtInput, setSrtInput] = useState('');
   const [offset, setOffset] = useState(0);
+  // Default duration limit (0 = Auto/No Limit)
   const [durationLimit, setDurationLimit] = useState(0);
 
   // --- STATE UNTUK SYNC TOOL ---
@@ -52,7 +53,7 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, activeTab, syncStep, syncIndex, syncLines]); // Dependencies penting agar state terbaca
+  }, [isOpen, activeTab, syncStep, syncIndex, syncLines, durationLimit]); // Tambahkan durationLimit ke dependency
 
   if (!isOpen) return null;
 
@@ -138,14 +139,25 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
     const currentData = [...syncDataRef.current];
 
     // Update waktu akhir baris sebelumnya (jika ada)
+    // Jika durationLimit diset > 0, kita tidak perlu memaksakan end time baris sebelumnya ke current time
+    // KECUALI jika kita ingin mode "sambung menyambung" (karaoke style).
+    // Tapi untuk fleksibilitas, kita set end time baris sebelumnya ke currentTime agar tidak overlap.
     if (syncIndex > 0 && currentData.length > 0) {
-        currentData[currentData.length - 1].end = currentTime;
+        const prev = currentData[currentData.length - 1];
+        // Jika limit aktif, cek apakah durasi real lebih pendek dari limit?
+        // Tapi logic standar sync adalah: Tap baru = Akhir tap lama.
+        prev.end = currentTime; 
     }
+
+    // Tentukan durasi default untuk baris baru ini
+    // Jika durationLimit 0 (Auto), kita pasang placeholder 5 detik (nanti dipotong tap berikutnya).
+    // Jika durationLimit > 0, kita gunakan sebagai end time target.
+    const effectiveDuration = durationLimit > 0 ? durationLimit : 5;
 
     // Tambah baris baru
     const newEntry: Subtitle = {
         start: currentTime,
-        end: currentTime + 5, // Default placeholder
+        end: currentTime + effectiveDuration, 
         text: syncLines[syncIndex]
     };
 
@@ -177,7 +189,11 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
     // Finalisasi data terakhir
     const finalData = [...syncDataRef.current];
     if (finalData.length > 0 && audioRef.current) {
-        finalData[finalData.length - 1].end = audioRef.current.currentTime;
+        // Jika Auto (0), set end ke waktu stop
+        // Jika ada limit, biarkan sesuai perhitungan awal (start + limit) ATAU clamp ke waktu stop
+        if (durationLimit === 0) {
+             finalData[finalData.length - 1].end = audioRef.current.currentTime;
+        }
     }
 
     // Konversi ke format SRT string untuk ditampilkan di input manual (agar user bisa edit lagi)
@@ -282,14 +298,22 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
                             </div>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 mb-1 block">Hapus Lirik Setelah (s)</label>
-                            <input 
-                                type="number" 
-                                value={durationLimit}
-                                onChange={(e) => setDurationLimit(parseFloat(e.target.value))}
-                                placeholder="Auto" 
-                                className="w-full bg-black/50 border border-gray-600 rounded p-1 text-center text-white text-xs"
-                            />
+                            <label className="text-[10px] text-gray-400 mb-1 block">Durasi Tampil (Detik)</label>
+                            <div className="flex gap-1">
+                                <input 
+                                    type="number" 
+                                    value={durationLimit}
+                                    onChange={(e) => setDurationLimit(parseFloat(e.target.value))}
+                                    placeholder="Auto" 
+                                    className="w-full bg-black/50 border border-gray-600 rounded p-1 text-center text-white text-xs"
+                                />
+                            </div>
+                            {/* Preset Buttons */}
+                            <div className="flex gap-1 mt-1 justify-between">
+                                <button onClick={() => setDurationLimit(0)} className={`text-[9px] px-1.5 py-0.5 rounded border ${durationLimit===0 ? 'border-cyan-400 text-cyan-400' : 'border-gray-600 text-gray-400'}`}>Auto</button>
+                                <button onClick={() => setDurationLimit(3)} className={`text-[9px] px-1.5 py-0.5 rounded border ${durationLimit===3 ? 'border-cyan-400 text-cyan-400' : 'border-gray-600 text-gray-400'}`}>3s</button>
+                                <button onClick={() => setDurationLimit(5)} className={`text-[9px] px-1.5 py-0.5 rounded border ${durationLimit===5 ? 'border-cyan-400 text-cyan-400' : 'border-gray-600 text-gray-400'}`}>5s</button>
+                            </div>
                         </div>
                     </div>
 
@@ -304,11 +328,28 @@ export default function SubtitleModal({ isOpen, onClose, audioRef, onSave }: Pro
                 <div className="flex flex-col h-full">
                     {syncStep === 1 ? (
                         <div className="space-y-4">
-                            <p className="text-xs text-gray-400">Paste lirik lagu di sini (tanpa waktu). Setiap baris baru akan menjadi tampilan baru.</p>
+                            <p className="text-xs text-gray-400">Paste lirik lagu di sini. Tentukan juga durasi default di tab Manual jika perlu.</p>
+                            
+                            {/* Short Settings in Sync Mode */}
+                            <div className="flex items-center gap-2 mb-2 bg-white/5 p-2 rounded-lg">
+                                <span className="text-[10px] text-gray-400">Durasi per Baris:</span>
+                                <div className="flex gap-1">
+                                    {[0, 3, 5].map(v => (
+                                        <button 
+                                            key={v} 
+                                            onClick={() => setDurationLimit(v)}
+                                            className={`px-2 py-0.5 rounded text-[10px] border ${durationLimit === v ? 'border-cyan-400 text-cyan-400 bg-cyan-900/20' : 'border-gray-600 text-gray-500'}`}
+                                        >
+                                            {v === 0 ? 'Auto' : `${v}s`}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             <textarea 
                                 value={rawLyrics}
                                 onChange={(e) => setRawLyrics(e.target.value)}
-                                className="w-full h-48 bg-black/30 border border-gray-700 rounded-lg p-3 text-sm font-mono text-gray-300 focus:outline-none focus:border-cyan-400 resize-none"
+                                className="w-full h-40 bg-black/30 border border-gray-700 rounded-lg p-3 text-sm font-mono text-gray-300 focus:outline-none focus:border-cyan-400 resize-none"
                                 placeholder="Paste lirik lagu di sini...&#10;Baris satu&#10;Baris dua"
                             />
                             <button onClick={startSync} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">

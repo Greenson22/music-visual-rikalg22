@@ -281,11 +281,13 @@ export default function AudioVisualizerView() {
          // Terapkan offset waktu
          const lookupTime = currentTime - subtitleOffset;
          
+         // Cari subtitle yang aktif berdasarkan range start - end
          const found = subtitles.find(s => lookupTime >= s.start && lookupTime <= s.end);
          
          if (found) {
              // Logic duration limit (auto hide)
              // Jika limit > 0 DAN waktu berlalu sejak start subtitle > limit
+             // Ini akan memotong subtitle yang durasinya di SRT lebih panjang dari limit yang ditentukan user
              if (subtitleDurationLimit > 0 && (lookupTime - found.start > subtitleDurationLimit)) {
                  setCurrentSubtitle('');
              } else {
@@ -427,7 +429,7 @@ export default function AudioVisualizerView() {
       setSubtitles(subs);
       setSubtitleOffset(offset);
       setSubtitleDurationLimit(limit);
-      setStatusText(`Lirik dimuat: ${subs.length} baris`);
+      setStatusText(`Lirik dimuat: ${subs.length} baris${limit > 0 ? ` (Max ${limit}s)` : ''}`);
   };
 
   // --- RENDER ---

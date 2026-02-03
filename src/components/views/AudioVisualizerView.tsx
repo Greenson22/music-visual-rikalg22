@@ -59,7 +59,8 @@ export default function AudioVisualizerView() {
 
   // --- SUBTITLE STATE (DIPERBARUI) ---
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
-  const [currentSubtitle, setCurrentSubtitle] = useState('');
+  // Mengubah state string menjadi object Subtitle atau null untuk fitur Karaoke
+  const [currentSubtitle, setCurrentSubtitle] = useState<Subtitle | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [subtitleOffset, setSubtitleOffset] = useState(0);
   const [subtitleDurationLimit, setSubtitleDurationLimit] = useState(0);
@@ -275,7 +276,7 @@ export default function AudioVisualizerView() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --- SUBTITLE UPDATE LOGIC (DIPERBARUI) ---
+  // --- SUBTITLE UPDATE LOGIC (DIPERBARUI UNTUK KARAOKE) ---
   useEffect(() => {
      if(subtitles.length > 0) {
          // Terapkan offset waktu
@@ -287,17 +288,17 @@ export default function AudioVisualizerView() {
          if (found) {
              // Logic duration limit (auto hide)
              // Jika limit > 0 DAN waktu berlalu sejak start subtitle > limit
-             // Ini akan memotong subtitle yang durasinya di SRT lebih panjang dari limit yang ditentukan user
              if (subtitleDurationLimit > 0 && (lookupTime - found.start > subtitleDurationLimit)) {
-                 setCurrentSubtitle('');
+                 setCurrentSubtitle(null);
              } else {
-                 setCurrentSubtitle(found.text);
+                 // Set objek subtitle lengkap, bukan hanya teks
+                 setCurrentSubtitle(found);
              }
          } else {
-             setCurrentSubtitle('');
+             setCurrentSubtitle(null);
          }
      } else {
-         setCurrentSubtitle('');
+         setCurrentSubtitle(null);
      }
   }, [currentTime, subtitles, subtitleOffset, subtitleDurationLimit]);
 
@@ -344,7 +345,7 @@ export default function AudioVisualizerView() {
     
     // Reset subtitles saat ganti lagu
     setSubtitles([]); 
-    setCurrentSubtitle('');
+    setCurrentSubtitle(null);
 
     const objectUrl = URL.createObjectURL(file);
     if(audioRef.current) {
@@ -436,7 +437,12 @@ export default function AudioVisualizerView() {
   return (
     <MainLayout>
       <VisualizerCanvas canvasRef={canvasRef} />
-      <SubtitleOverlay text={currentSubtitle} />
+      
+      {/* UPDATE: Pass currentSubtitle sebagai object dan currentTime yang sudah dikoreksi offset */}
+      <SubtitleOverlay 
+        currentSubtitle={currentSubtitle} 
+        currentTime={currentTime - subtitleOffset}
+      />
       
       {/* INPUT FOLDER TERSEMBUNYI (GLOBAL) */}
       <input 
@@ -491,7 +497,7 @@ export default function AudioVisualizerView() {
           />
       )}
 
-      {/* SUBTITLE MODAL (BARU) */}
+      {/* SUBTITLE MODAL */}
       <SubtitleModal 
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

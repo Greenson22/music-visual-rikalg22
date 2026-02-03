@@ -27,7 +27,13 @@ export default function AudioVisualizerView() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  
+  // Ref untuk Source yang sedang aktif (bisa Mic atau File)
   const sourceRef = useRef<MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null>(null);
+  
+  // TAMBAHAN BARU: Ref khusus untuk menyimpan Source Audio Element agar tidak dibuat ulang (Penyebab Error)
+  const mediaElementSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+
   const particlesRef = useRef<Particle[]>([]);
   const animationFrameRef = useRef<number>(0);
   const dataArrayRef = useRef<Uint8Array | null>(null);
@@ -71,15 +77,25 @@ export default function AudioVisualizerView() {
     }
   };
 
-  // 2. Hubungkan Audio Element (File) ke Analyser
+  // 2. Hubungkan Audio Element (File) ke Analyser (DIPERBARUI)
   const connectAudioSource = () => {
     if (!audioRef.current || !audioContextRef.current || !analyserRef.current) return;
 
+    // Putuskan koneksi source yang sedang aktif sebelumnya (misal bekas Mic atau lagu sebelumnya)
     if (sourceRef.current) {
       sourceRef.current.disconnect();
     }
 
-    sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+    // Cek apakah kita sudah pernah membuat MediaElementSource untuk <audio> ini?
+    if (!mediaElementSourceRef.current) {
+        // Jika belum, buat baru (hanya sekali seumur hidup komponen)
+        mediaElementSourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+    }
+
+    // Gunakan instance yang sudah ada di cache
+    sourceRef.current = mediaElementSourceRef.current;
+
+    // Sambungkan kembali ke Analyser
     sourceRef.current.connect(analyserRef.current);
     analyserRef.current.connect(audioContextRef.current.destination);
   };

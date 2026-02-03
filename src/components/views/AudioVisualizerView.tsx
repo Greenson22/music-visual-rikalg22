@@ -1,3 +1,4 @@
+// src/components/views/AudioVisualizerView.tsx
 'use client';
 
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
@@ -7,8 +8,9 @@ import SubtitleOverlay from '../fragments/SubtitleOverlay';
 import AppHeader from '../fragments/AppHeader';
 import UploadPrompt from '../fragments/UploadPrompt';
 import PlayerControls from '../fragments/PlayerControls';
-import GlassPanel from '../elements/GlassPanel';
 import FileManager from '../fragments/FileManager';
+// Import Modal Baru
+import SubtitleModal from '../fragments/SubtitleModal';
 import { Subtitle, FileNode } from '@/types';
 
 // Definisi Tipe untuk Partikel Visual
@@ -31,7 +33,7 @@ export default function AudioVisualizerView() {
   // Ref untuk Source yang sedang aktif (bisa Mic atau File)
   const sourceRef = useRef<MediaElementAudioSourceNode | MediaStreamAudioSourceNode | null>(null);
   
-  // TAMBAHAN BARU: Ref khusus untuk menyimpan Source Audio Element agar tidak dibuat ulang (Penyebab Error)
+  // Ref khusus untuk menyimpan Source Audio Element agar tidak dibuat ulang (Penyebab Error)
   const mediaElementSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const particlesRef = useRef<Particle[]>([]);
@@ -55,10 +57,12 @@ export default function AudioVisualizerView() {
   const [fileTree, setFileTree] = useState<FileNode | null>(null);
   const [showFileManager, setShowFileManager] = useState(false);
 
-  // Subtitle State
+  // --- SUBTITLE STATE (DIPERBARUI) ---
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [currentSubtitle, setCurrentSubtitle] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [subtitleOffset, setSubtitleOffset] = useState(0);
+  const [subtitleDurationLimit, setSubtitleDurationLimit] = useState(0);
 
   // --- LOGIC IMPLEMENTATION ---
 
@@ -77,11 +81,11 @@ export default function AudioVisualizerView() {
     }
   };
 
-  // 2. Hubungkan Audio Element (File) ke Analyser (DIPERBARUI)
+  // 2. Hubungkan Audio Element (File) ke Analyser
   const connectAudioSource = () => {
     if (!audioRef.current || !audioContextRef.current || !analyserRef.current) return;
 
-    // Putuskan koneksi source yang sedang aktif sebelumnya (misal bekas Mic atau lagu sebelumnya)
+    // Putuskan koneksi source yang sedang aktif sebelumnya
     if (sourceRef.current) {
       sourceRef.current.disconnect();
     }
@@ -271,12 +275,29 @@ export default function AudioVisualizerView() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // --- SUBTITLE UPDATE LOGIC (DIPERBARUI) ---
   useEffect(() => {
      if(subtitles.length > 0) {
-         const found = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
-         setCurrentSubtitle(found ? found.text : '');
+         // Terapkan offset waktu
+         const lookupTime = currentTime - subtitleOffset;
+         
+         const found = subtitles.find(s => lookupTime >= s.start && lookupTime <= s.end);
+         
+         if (found) {
+             // Logic duration limit (auto hide)
+             // Jika limit > 0 DAN waktu berlalu sejak start subtitle > limit
+             if (subtitleDurationLimit > 0 && (lookupTime - found.start > subtitleDurationLimit)) {
+                 setCurrentSubtitle('');
+             } else {
+                 setCurrentSubtitle(found.text);
+             }
+         } else {
+             setCurrentSubtitle('');
+         }
+     } else {
+         setCurrentSubtitle('');
      }
-  }, [currentTime, subtitles]);
+  }, [currentTime, subtitles, subtitleOffset, subtitleDurationLimit]);
 
 
   // --- HANDLERS ---
@@ -287,7 +308,7 @@ export default function AudioVisualizerView() {
       const tree = buildFileTree(e.target.files);
       setFileTree(tree);
       setShowIntro(false);
-      setShowFileManager(true); // Langsung buka manager setelah pilih folder
+      setShowFileManager(true); 
       setStatusText(`Library: ${tree.name}`);
     }
   };
@@ -295,7 +316,7 @@ export default function AudioVisualizerView() {
   // 2. Trigger Klik Input Folder Hidden
   const triggerFolderSelect = () => {
       if (folderInputRef.current) {
-          folderInputRef.current.value = ''; // Reset value agar bisa pilih folder yang sama jika perlu
+          folderInputRef.current.value = ''; 
           folderInputRef.current.click();
       }
   };
@@ -315,10 +336,14 @@ export default function AudioVisualizerView() {
 
     setTrackName(file.name);
     setShowIntro(false);
-    setShowFileManager(false); // Tutup manager saat play
+    setShowFileManager(false); 
     setIsMicMode(false);
     setStatusText("Memutar File Lokal");
     
+    // Reset subtitles saat ganti lagu
+    setSubtitles([]); 
+    setCurrentSubtitle('');
+
     const objectUrl = URL.createObjectURL(file);
     if(audioRef.current) {
         audioRef.current.src = objectUrl;
@@ -397,6 +422,14 @@ export default function AudioVisualizerView() {
       }
   };
 
+  // 7. Handler Simpan Subtitle dari Modal
+  const handleSaveSubtitles = (subs: Subtitle[], offset: number, limit: number) => {
+      setSubtitles(subs);
+      setSubtitleOffset(offset);
+      setSubtitleDurationLimit(limit);
+      setStatusText(`Lirik dimuat: ${subs.length} baris`);
+  };
+
   // --- RENDER ---
   return (
     <MainLayout>
@@ -404,7 +437,6 @@ export default function AudioVisualizerView() {
       <SubtitleOverlay text={currentSubtitle} />
       
       {/* INPUT FOLDER TERSEMBUNYI (GLOBAL) */}
-      {/* Atribut webkitdirectory dan directory di-cast ke any agar valid di TS */}
       <input 
           type="file" 
           ref={folderInputRef}
@@ -415,7 +447,6 @@ export default function AudioVisualizerView() {
 
       <div className="relative z-20 h-screen flex flex-col justify-between p-6 pointer-events-none">
         
-        {/* Header: Tombol Library hanya muncul jika fileTree sudah ada (folder sudah dipilih) */}
         <AppHeader 
             statusText={statusText} 
             onOpenModal={() => setIsModalOpen(true)}
@@ -458,26 +489,13 @@ export default function AudioVisualizerView() {
           />
       )}
 
-      {/* MODAL SETTINGS (Placeholder untuk Subtitle Editor) */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm pointer-events-auto">
-            <GlassPanel className="w-11/12 max-w-lg rounded-2xl p-6 relative flex flex-col max-h-[90vh]">
-                <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white">
-                    <i className="fas fa-times text-xl"></i>
-                </button>
-                <h2 className="text-xl font-bold mb-4">Pengaturan Lirik</h2>
-                <p className="text-gray-300 mb-4">Fitur sinkronisasi lirik akan segera hadir.</p>
-                <div className="flex justify-end">
-                    <button 
-                        onClick={() => setIsModalOpen(false)}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg transition"
-                    >
-                        Tutup
-                    </button>
-                </div>
-            </GlassPanel>
-        </div>
-      )}
+      {/* SUBTITLE MODAL (BARU) */}
+      <SubtitleModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        audioRef={audioRef}
+        onSave={handleSaveSubtitles}
+      />
 
       <audio 
         ref={audioRef} 

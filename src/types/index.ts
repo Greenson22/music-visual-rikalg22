@@ -1,8 +1,15 @@
 // src/types/index.ts
+export interface SubtitleWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface Subtitle {
   start: number;
   end: number;
   text: string;
+  words?: SubtitleWord[]; // Opsional: Detail per kata
 }
 
 export interface SyncData {
@@ -13,11 +20,10 @@ export interface SyncData {
 
 export type TabType = 'manual' | 'sync';
 
-// --- TAMBAHAN BARU ---
 export interface FileNode {
   name: string;
   path: string;
   type: 'file' | 'folder';
-  file?: File; // Hanya ada jika type === 'file'
+  file?: File;
   children: FileNode[];
 }

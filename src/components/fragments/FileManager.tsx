@@ -1,18 +1,24 @@
-// src/components/fragments/FileManager.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import GlassPanel from '../elements/GlassPanel';
-import { FaFolder, FaFileAudio, FaArrowLeft, FaXmark } from 'react-icons/fa6';
+import { FaFolder, FaFileAudio, FaArrowLeft, FaXmark, FaRotate } from 'react-icons/fa6';
 import { FileNode } from '@/types';
 
 interface Props {
   rootNode: FileNode;
   onSelectFile: (file: File) => void;
   onClose: () => void;
+  onChangeFolder: () => void; // Prop baru
 }
 
-export default function FileManager({ rootNode, onSelectFile, onClose }: Props) {
+export default function FileManager({ rootNode, onSelectFile, onClose, onChangeFolder }: Props) {
   const [currentFolder, setCurrentFolder] = useState<FileNode>(rootNode);
   const [history, setHistory] = useState<FileNode[]>([]);
+
+  // Reset history jika rootNode berubah (saat user ganti folder utama)
+  React.useEffect(() => {
+      setCurrentFolder(rootNode);
+      setHistory([]);
+  }, [rootNode]);
 
   const handleEnterFolder = (folder: FileNode) => {
     setHistory([...history, currentFolder]);
@@ -26,7 +32,6 @@ export default function FileManager({ rootNode, onSelectFile, onClose }: Props) 
     setCurrentFolder(previous);
   };
 
-  // Sort: Folder dulu, baru File
   const sortedChildren = [...currentFolder.children].sort((a, b) => {
     if (a.type === b.type) return a.name.localeCompare(b.name);
     return a.type === 'folder' ? -1 : 1;
@@ -36,27 +41,44 @@ export default function FileManager({ rootNode, onSelectFile, onClose }: Props) 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-80 backdrop-blur-md pointer-events-auto p-4">
       <GlassPanel className="w-full max-w-3xl h-[80vh] flex flex-col rounded-2xl overflow-hidden relative border border-gray-700">
         
-        {/* Header File Manager */}
+        {/* Header */}
         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-white/5">
-          <div className="flex items-center gap-3">
-            {history.length > 0 && (
+          <div className="flex items-center gap-3 overflow-hidden">
+            {history.length > 0 ? (
               <button onClick={handleBack} className="text-gray-300 hover:text-white transition">
                 <FaArrowLeft />
               </button>
+            ) : (
+                <FaFolder className="text-amber-400" />
             )}
-            <h2 className="text-lg font-bold text-white truncate max-w-[200px] md:max-w-md">
-               /{currentFolder.name === 'root' ? 'Music Library' : currentFolder.name}
+            <h2 className="text-lg font-bold text-white truncate">
+               {currentFolder.name}
             </h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-red-400 transition">
-            <FaXmark className="text-xl" />
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {/* Tombol Ganti Folder */}
+            <button 
+                onClick={onChangeFolder}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-white transition mr-2"
+                title="Ganti Folder Utama"
+            >
+                <FaRotate /> Ganti Sumber
+            </button>
+            
+            <button onClick={onClose} className="text-gray-400 hover:text-red-400 transition">
+              <FaXmark className="text-xl" />
+            </button>
+          </div>
         </div>
 
-        {/* Content List */}
+        {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
           {sortedChildren.length === 0 ? (
-            <div className="text-center text-gray-500 py-10">Folder ini kosong</div>
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <FaFolder className="text-4xl mb-2 opacity-20" />
+                <p>Folder Kosong</p>
+            </div>
           ) : (
             sortedChildren.map((node, idx) => (
               <div 
@@ -73,18 +95,13 @@ export default function FileManager({ rootNode, onSelectFile, onClose }: Props) 
                   </p>
                   {node.type === 'file' && (
                     <p className="text-xs text-gray-500 truncate">
-                      {(node.file!.size / 1024 / 1024).toFixed(2)} MB
+                      File Audio
                     </p>
                   )}
                 </div>
               </div>
             ))
           )}
-        </div>
-
-        {/* Footer / Breadcrumbs (Opsional simple) */}
-        <div className="p-2 bg-black/20 text-xs text-gray-500 px-4">
-            Total items: {sortedChildren.length}
         </div>
       </GlassPanel>
     </div>

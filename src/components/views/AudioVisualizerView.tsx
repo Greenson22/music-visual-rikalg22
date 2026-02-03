@@ -8,10 +8,10 @@ import AppHeader from '../fragments/AppHeader';
 import UploadPrompt from '../fragments/UploadPrompt';
 import PlayerControls from '../fragments/PlayerControls';
 import GlassPanel from '../elements/GlassPanel';
-import FileManager from '../fragments/FileManager'; // Import baru
+import FileManager from '../fragments/FileManager';
 import { Subtitle, FileNode } from '@/types';
 
-// ... (Interface Particle tetap sama)
+// Definisi Tipe untuk Partikel Visual
 interface Particle {
   x: number;
   y: number;
@@ -31,6 +31,9 @@ export default function AudioVisualizerView() {
   const particlesRef = useRef<Particle[]>([]);
   const animationFrameRef = useRef<number>(0);
   const dataArrayRef = useRef<Uint8Array | null>(null);
+  
+  // Ref khusus untuk input folder agar bisa dipanggil berulang kali
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   // --- STATE ---
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,10 +41,11 @@ export default function AudioVisualizerView() {
   const [duration, setDuration] = useState(0);
   const [trackName, setTrackName] = useState('Unknown Track');
   const [statusText, setStatusText] = useState('Menunggu input audio...');
+  
   const [showIntro, setShowIntro] = useState(true);
   const [isMicMode, setIsMicMode] = useState(false);
   
-  // File Manager State (BARU)
+  // File Manager State
   const [fileTree, setFileTree] = useState<FileNode | null>(null);
   const [showFileManager, setShowFileManager] = useState(false);
 
@@ -50,152 +54,166 @@ export default function AudioVisualizerView() {
   const [currentSubtitle, setCurrentSubtitle] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // ... (Bagian Logic AudioContext, ConnectAudioSource, InitParticles, RenderVisualizer SAMA SEPERTI SEBELUMNYA, tidak diubah) ...
-  // (Saya mempersingkat bagian ini agar fokus pada perubahan, copy paste logic audio lama di sini)
-    // 1. Inisialisasi Audio Context
-    const initAudioContext = () => {
-        if (!audioContextRef.current) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        audioContextRef.current = new AudioContextClass();
-        analyserRef.current = audioContextRef.current.createAnalyser();
-        analyserRef.current.fftSize = 256; 
-        const bufferLength = analyserRef.current.frequencyBinCount;
-        dataArrayRef.current = new Uint8Array(bufferLength);
-        }
-    };
+  // --- LOGIC IMPLEMENTATION ---
+
+  // 1. Inisialisasi Audio Context
+  const initAudioContext = () => {
+    if (!audioContextRef.current) {
+      // Menangani kompatibilitas browser
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new AudioContextClass();
+      
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256; 
+      
+      const bufferLength = analyserRef.current.frequencyBinCount;
+      dataArrayRef.current = new Uint8Array(bufferLength);
+    }
+  };
+
+  // 2. Hubungkan Audio Element (File) ke Analyser
+  const connectAudioSource = () => {
+    if (!audioRef.current || !audioContextRef.current || !analyserRef.current) return;
+
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+    }
+
+    sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
+    sourceRef.current.connect(analyserRef.current);
+    analyserRef.current.connect(audioContextRef.current.destination);
+  };
+
+  // 3. Setup Partikel Visual
+  const initParticles = () => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const width = canvas.width;
+    const height = canvas.height;
     
-    // 2. Hubungkan Audio Element (File) ke Analyser
-    const connectAudioSource = () => {
-        if (!audioRef.current || !audioContextRef.current || !analyserRef.current) return;
-        if (sourceRef.current) sourceRef.current.disconnect();
-        sourceRef.current = audioContextRef.current.createMediaElementSource(audioRef.current);
-        sourceRef.current.connect(analyserRef.current);
-        analyserRef.current.connect(audioContextRef.current.destination);
-    };
+    particlesRef.current = [];
+    const particleCount = 100;
 
-    // 3. Setup Partikel
-    const initParticles = () => {
-        if (!canvasRef.current) return;
-        const canvas = canvasRef.current;
-        particlesRef.current = [];
-        for (let i = 0; i < 100; i++) {
-             particlesRef.current.push({
-                x: Math.random() * canvas.width,
-                y: Math.random() * canvas.height,
-                radius: Math.random() * 3 + 1,
-                color: `hsl(${Math.random() * 360}, 50%, 50%)`,
-                velocity: { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2 },
-                alpha: Math.random()
-             });
+    for (let i = 0; i < particleCount; i++) {
+      particlesRef.current.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        radius: Math.random() * 3 + 1,
+        color: `hsl(${Math.random() * 360}, 50%, 50%)`,
+        velocity: {
+          x: (Math.random() - 0.5) * 2,
+          y: (Math.random() - 0.5) * 2
+        },
+        alpha: Math.random()
+      });
+    }
+  };
+
+  // 4. Loop Animasi (Render Visualizer)
+  const renderVisualizer = () => {
+    if (!canvasRef.current || !analyserRef.current || !dataArrayRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Gunakan 'as any' untuk menghindari strict type checking pada Uint8Array
+    analyserRef.current.getByteFrequencyData(dataArrayRef.current as any);
+    
+    // Hitung rata-rata bass
+    let bass = 0;
+    for (let i = 0; i < 20; i++) {
+        if (dataArrayRef.current[i]) {
+            bass += dataArrayRef.current[i];
         }
-    };
+    }
+    bass = bass / 20; 
+    const scale = 1 + (bass / 255) * 0.5;
 
-    // 4. Render
-    const renderVisualizer = () => {
-        if (!canvasRef.current || !analyserRef.current || !dataArrayRef.current) return;
-        const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+    // Clear Canvas
+    ctx.fillStyle = 'rgba(5, 5, 5, 0.2)'; 
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw Circle Center
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = 100 * scale;
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `hsl(${bass + 180}, 100%, 50%)`;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = `hsl(${bass + 180}, 100%, 50%)`;
+
+    // Draw Frequency Bars
+    const barCount = 60;
+    const step = (Math.PI * 2) / barCount;
+    
+    for (let i = 0; i < barCount; i++) {
+        const dataIndex = Math.floor((i / barCount) * (dataArrayRef.current.length / 2));
+        const value = dataArrayRef.current[dataIndex] || 0;
+        const barHeight = (value / 255) * 100 * scale;
         
-        analyserRef.current.getByteFrequencyData(dataArrayRef.current as any);
+        const angle = i * step;
         
-        let bass = 0;
-        for (let i = 0; i < 20; i++) if (dataArrayRef.current[i]) bass += dataArrayRef.current[i];
-        bass = bass / 20; 
-        const scale = 1 + (bass / 255) * 0.5;
-
-        ctx.fillStyle = 'rgba(5, 5, 5, 0.2)'; 
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2;
-        const radius = 100 * scale;
-
-        // Circle
+        const x1 = centerX + Math.cos(angle) * radius;
+        const y1 = centerY + Math.sin(angle) * radius;
+        
+        const x2 = centerX + Math.cos(angle) * (radius + barHeight);
+        const y2 = centerY + Math.sin(angle) * (radius + barHeight);
+        
         ctx.beginPath();
-        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-        ctx.strokeStyle = `hsl(${bass + 180}, 100%, 50%)`;
-        ctx.lineWidth = 5;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `hsl(${i * 5 + bass}, 70%, 60%)`;
+        ctx.lineWidth = 2;
         ctx.stroke();
+    }
 
-        // Bars
-        const barCount = 60;
-        const step = (Math.PI * 2) / barCount;
-        for (let i = 0; i < barCount; i++) {
-            const dataIndex = Math.floor((i / barCount) * (dataArrayRef.current.length / 2));
-            const value = dataArrayRef.current[dataIndex] || 0;
-            const barHeight = (value / 255) * 100 * scale;
-            const angle = i * step;
-            const x1 = centerX + Math.cos(angle) * radius;
-            const y1 = centerY + Math.sin(angle) * radius;
-            const x2 = centerX + Math.cos(angle) * (radius + barHeight);
-            const y2 = centerY + Math.sin(angle) * (radius + barHeight);
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.strokeStyle = `hsl(${i * 5 + bass}, 70%, 60%)`;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
+    // Draw Particles
+    particlesRef.current.forEach(p => {
+        p.x += p.velocity.x * scale;
+        p.y += p.velocity.y * scale;
 
-        // Particles
-        particlesRef.current.forEach(p => {
-            p.x += p.velocity.x * scale;
-            p.y += p.velocity.y * scale;
-            if (p.x < 0 || p.x > canvas.width) p.velocity.x *= -1;
-            if (p.y < 0 || p.y > canvas.height) p.velocity.y *= -1;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.radius * scale, 0, Math.PI * 2);
-            ctx.fillStyle = p.color;
-            ctx.globalAlpha = p.alpha;
-            ctx.fill();
-            ctx.globalAlpha = 1.0;
-        });
+        if (p.x < 0 || p.x > width) p.velocity.x *= -1;
+        if (p.y < 0 || p.y > height) p.velocity.y *= -1;
 
-        animationFrameRef.current = requestAnimationFrame(renderVisualizer);
-    };
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius * scale, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+    });
 
-
-  // --- EFFECTS ---
-
-  useEffect(() => {
-    const handleResize = () => {
-        if (canvasRef.current) {
-            canvasRef.current.width = window.innerWidth;
-            canvasRef.current.height = window.innerHeight;
-            initParticles();
-        }
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
-     if(subtitles.length > 0) {
-         const found = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
-         setCurrentSubtitle(found ? found.text : '');
-     }
-  }, [currentTime, subtitles]);
-
+    animationFrameRef.current = requestAnimationFrame(renderVisualizer);
+  };
 
   // --- HELPER UNTUK MEMBANGUN TREE FOLDER ---
   const buildFileTree = (files: FileList): FileNode => {
-    const root: FileNode = { name: 'root', path: '', type: 'folder', children: [] };
+    // Root default
+    const root: FileNode = { name: 'Library', path: '', type: 'folder', children: [] };
     
-    // Konversi FileList ke Array untuk iterasi yang mudah
     Array.from(files).forEach(file => {
       // Filter hanya file audio
       if (!file.type.startsWith('audio/')) return;
 
       const pathParts = file.webkitRelativePath.split('/');
-      // webkitRelativePath contoh: "FolderUtama/SubFolder/Lagu.mp3"
-      // Part pertama biasanya nama folder root yang dipilih user, kita bisa skip atau pakai
       
+      // Ambil nama root folder asli dari file pertama jika masih default
+      if(root.name === 'Library' && pathParts.length > 0) {
+          root.name = pathParts[0]; 
+      }
+
       let currentNode = root;
 
-      // Iterasi path parts (kecuali nama file terakhir)
-      for (let i = 0; i < pathParts.length - 1; i++) {
+      // Iterasi path (skip root folder name di index 0 dan nama file di index terakhir)
+      for (let i = 1; i < pathParts.length - 1; i++) {
         const part = pathParts[i];
         let child = currentNode.children.find(c => c.name === part && c.type === 'folder');
         
@@ -220,26 +238,59 @@ export default function AudioVisualizerView() {
     return root;
   };
 
+  // --- EFFECTS ---
+
+  useEffect(() => {
+    const handleResize = () => {
+        if (canvasRef.current) {
+            canvasRef.current.width = window.innerWidth;
+            canvasRef.current.height = window.innerHeight;
+            initParticles();
+        }
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+     if(subtitles.length > 0) {
+         const found = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
+         setCurrentSubtitle(found ? found.text : '');
+     }
+  }, [currentTime, subtitles]);
+
+
   // --- HANDLERS ---
 
-  // Handler untuk SATU file langsung
-  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) playAudioFile(file);
-  };
-
-  // Handler untuk FOLDER
-  const handleFolderUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  // 1. Handler Folder Change (Centralized)
+  const handleFolderChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const tree = buildFileTree(e.target.files);
       setFileTree(tree);
       setShowIntro(false);
-      setShowFileManager(true);
-      setStatusText("Menjelajahi File...");
+      setShowFileManager(true); // Langsung buka manager setelah pilih folder
+      setStatusText(`Library: ${tree.name}`);
     }
   };
 
-  // Fungsi Play Central (dipakai oleh Upload Single & File Manager)
+  // 2. Trigger Klik Input Folder Hidden
+  const triggerFolderSelect = () => {
+      if (folderInputRef.current) {
+          folderInputRef.current.value = ''; // Reset value agar bisa pilih folder yang sama jika perlu
+          folderInputRef.current.click();
+      }
+  };
+
+  // 3. Handler Single File Upload
+  const handleSingleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) playAudioFile(file);
+  };
+
+  // 4. Play Audio Logic
   const playAudioFile = (file: File) => {
     initAudioContext();
     if(audioContextRef.current?.state === 'suspended') {
@@ -256,7 +307,9 @@ export default function AudioVisualizerView() {
     if(audioRef.current) {
         audioRef.current.src = objectUrl;
         audioRef.current.load();
+        
         connectAudioSource();
+        
         audioRef.current.play()
             .then(() => {
                 setIsPlaying(true);
@@ -266,14 +319,18 @@ export default function AudioVisualizerView() {
     }
   };
 
+  // 5. Mic Mode Logic
   const handleMicMode = async () => {
-      // (Sama seperti sebelumnya)
       try {
         initAudioContext();
         if(!audioContextRef.current || !analyserRef.current) return;
-        if(audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
+        
+        if(audioContextRef.current.state === 'suspended') {
+            await audioContextRef.current.resume();
+        }
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
         if(sourceRef.current) sourceRef.current.disconnect();
 
         const micSource = audioContextRef.current.createMediaStreamSource(stream);
@@ -286,18 +343,29 @@ export default function AudioVisualizerView() {
         setStatusText("Mode Mikrofon Aktif");
         setIsPlaying(true);
         
-        if(audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; }
+        if(audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.src = "";
+        }
+
         renderVisualizer(); 
-      } catch (err) { console.error("Mic Error:", err); alert("Gagal akses mikrofon."); }
+
+      } catch (err) {
+          console.error("Mic Error:", err);
+          alert("Gagal akses mikrofon. Pastikan izin diberikan.");
+      }
   };
 
+  // 6. Player Controls
   const togglePlay = () => {
     if (audioRef.current && !isMicMode) {
         if (isPlaying) {
             audioRef.current.pause();
             cancelAnimationFrame(animationFrameRef.current);
         } else {
-            if(audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
+            if(audioContextRef.current?.state === 'suspended') {
+                audioContextRef.current.resume();
+            }
             audioRef.current.play();
             renderVisualizer();
         }
@@ -319,9 +387,19 @@ export default function AudioVisualizerView() {
       <VisualizerCanvas canvasRef={canvasRef} />
       <SubtitleOverlay text={currentSubtitle} />
       
+      {/* INPUT FOLDER TERSEMBUNYI (GLOBAL) */}
+      {/* Atribut webkitdirectory dan directory di-cast ke any agar valid di TS */}
+      <input 
+          type="file" 
+          ref={folderInputRef}
+          onChange={handleFolderChange} 
+          {...({ webkitdirectory: "", directory: "" } as any)} 
+          className="hidden" 
+      />
+
       <div className="relative z-20 h-screen flex flex-col justify-between p-6 pointer-events-none">
         
-        {/* Header dengan tombol Library jika fileTree ada */}
+        {/* Header: Tombol Library hanya muncul jika fileTree sudah ada (folder sudah dipilih) */}
         <AppHeader 
             statusText={statusText} 
             onOpenModal={() => setIsModalOpen(true)}
@@ -331,8 +409,8 @@ export default function AudioVisualizerView() {
 
         {showIntro && (
             <UploadPrompt 
-                onFileUpload={handleFileUpload} 
-                onFolderUpload={handleFolderUpload} 
+                onFileUpload={handleSingleFileUpload} 
+                onTriggerFolder={triggerFolderSelect} 
             />
         )}
 
@@ -359,18 +437,12 @@ export default function AudioVisualizerView() {
           <FileManager 
              rootNode={fileTree} 
              onSelectFile={playAudioFile} 
-             onClose={() => {
-                // Jika sedang playing, cuma tutup overlay. Jika tidak, mungkin kembali ke intro?
-                // Kita buat simple: tutup saja.
-                setShowFileManager(false);
-                if (!isPlaying && !audioRef.current?.src) {
-                    setShowIntro(true); // Balik ke intro jika belum ada lagu dipilih
-                }
-             }}
+             onClose={() => setShowFileManager(false)}
+             onChangeFolder={triggerFolderSelect}
           />
       )}
 
-      {/* MODAL SETTINGS */}
+      {/* MODAL SETTINGS (Placeholder untuk Subtitle Editor) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm pointer-events-auto">
             <GlassPanel className="w-11/12 max-w-lg rounded-2xl p-6 relative flex flex-col max-h-[90vh]">
@@ -394,11 +466,16 @@ export default function AudioVisualizerView() {
       <audio 
         ref={audioRef} 
         crossOrigin="anonymous" 
-        onEnded={() => { setIsPlaying(false); cancelAnimationFrame(animationFrameRef.current); }}
+        onEnded={() => {
+            setIsPlaying(false);
+            cancelAnimationFrame(animationFrameRef.current);
+        }}
         onTimeUpdate={() => {
              if(audioRef.current) {
                  setCurrentTime(audioRef.current.currentTime);
-                 if(!isNaN(audioRef.current.duration)) setDuration(audioRef.current.duration);
+                 if(!isNaN(audioRef.current.duration)) {
+                     setDuration(audioRef.current.duration);
+                 }
              }
         }}
       />
